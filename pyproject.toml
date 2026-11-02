@@ -1,0 +1,47 @@
+[project]
+name = "webm2mp3"
+version = "0.1.0"
+description = "Асинхронное извлечение звука MP3 из файлов WebM через HTTP API"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "imageio-ffmpeg>=0.8.0",
+]
+
+[project.scripts]
+webm2mp3 = "webm2mp3.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.17,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "webm2mp3"
+
+[dependency-groups]
+dev = [
+    "coverage>=7.17.0",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["examples"]
+
+[tool.coverage.run]
+branch = true
+source = ["webm2mp3"]
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "N", "C90", "PLR", "B", "I"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 7
+
+[tool.ruff.lint.pylint]
+max-args = 7

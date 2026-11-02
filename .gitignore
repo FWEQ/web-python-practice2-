@@ -1,0 +1,30 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Tools
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+
+# Editors
+.vscode/
+.idea/
+
+# Generated media and data
+samples/
+data/
+*.webm
+*.mp3
+*.zip
+*.tar.gz
