@@ -121,15 +121,31 @@ uv run webm2mp3-server --username admin --password secret
 
 ### Данные
 
-| Таблица | Поля |
-|---|---|
-| Entity | `identifier`, `name` |
-| Query | `identifier`, `entity` → Entity, `datetime` (UTC, ISO 8601), `description`, `tags` (список строк) |
-| Feedback | `query` → Query, `status` (`pending`, `running`, `done`, `failed`), `response` (путь к MP3 или текст ошибки) |
+Схема соответствует ER-диаграмме (рис. 11). Поле `datetime` хранит
+Unix-время в секундах и заполняется сервером.
 
-Идентификаторы состоят из латинских букв, цифр, `_` и `-` (до 64
-символов). При удалении Entity удаляются её запросы, при удалении Query
-удаляется его результат.
+| Таблица | Поле | Тип | Обязательное | Назначение |
+|---|---|---|---|---|
+| Entity | `identifier` | int | да | ключ |
+| | `datetime` | int | | время создания |
+| | `ip`, `locale`, `platform` | str | | сведения о клиенте |
+| Query | `identifier` | int | да | ключ |
+| | `datetime` | int | | время создания |
+| | `parameter` | str | | битрейт MP3 вида `128k` (по умолчанию `192k`) |
+| | `entity` | int | да | ссылка на Entity |
+| | `description` | str | | описание |
+| | `tags` | str | | теги через запятую |
+| | `status` | str | | `pending`, `running`, `done` или `failed` |
+| Feedback | `identifier` | int | да | ключ, назначается автоматически |
+| | `datetime` | int | | время завершения задачи |
+| | `response` | str | | путь к полученному MP3 |
+| | `status` | str | | `done` или `failed` |
+| | `failure` | str | | текст ошибки |
+| | `query` | int | да | ссылка на Query |
+
+Идентификаторы — целые неотрицательные числа. Одному Entity
+соответствует много Query, одному Query — много Feedback. При удалении
+Entity удаляются её запросы, при удалении Query — его результаты.
 
 ### Маршруты
 
@@ -137,23 +153,25 @@ uv run webm2mp3-server --username admin --password secret
 
 | № | Метод | Маршрут | Параметры | Действие |
 |---|---|---|---|---|
-| 1.1 | PUT | `/entity-save/:identifier` | тело `{"name"}` | создать Entity |
+| 1.1 | PUT | `/entity-save/:identifier` | тело `{"ip", "locale", "platform"}` | создать Entity |
 | 1.2 | POST | `/entity-delete` | тело `{"identifier"}` | удалить Entity |
-| 1.3 | GET | `/entity-show` | `?identifier=&name=` | найти Entity |
-| 1.4 | POST | `/entity-renew` | `?identifier=&name=` | изменить Entity |
-| 2.1 | PUT | `/query-save/:identifier` | тело `{"entity", "source", "description", "tags"}` | создать Query и запустить задачу |
+| 1.3 | GET | `/entity-show` | `?identifier=&ip=&locale=&platform=` | найти Entity |
+| 1.4 | POST | `/entity-renew` | `?identifier=&ip=&locale=&platform=` | изменить Entity |
+| 2.1 | PUT | `/query-save/:identifier` | тело `{"entity", "source", "parameter", "description", "tags"}` | создать Query и запустить задачу |
 | 2.2 | POST | `/query-delete` | тело `{"identifier"}` | удалить Query |
-| 2.3 | GET | `/query-show/:entity` | `?identifier=&tag=` | найти Query для Entity |
-| 2.4 | POST | `/query-renew` | `?identifier=&description=&tags=a,b` | изменить Query |
-| 3.1 | GET | `/feedback-show/:query` | `?status=` | найти результат Query |
+| 2.3 | GET | `/query-show/:entity` | `?identifier=&status=&tag=` | найти Query для Entity |
+| 2.4 | POST | `/query-renew` | `?identifier=&description=&tags=` | изменить Query |
+| 3.1 | GET | `/feedback-show/:query` | `?identifier=&status=` | найти результаты Query |
 | 4.1 | GET | `/report-show` | нет | отчёт по формуле (11) |
 
-В методе 2.1 поле `source` содержит файл WebM в Base64. Сервер сразу
-возвращает созданный Query, а Feedback со статусом `pending`
-обрабатывается в фоне. Задача запускает `python -m webm2mp3.cli` через
-`subprocess` и по завершении записывает в Feedback статус `done` и путь
-к MP3 либо статус `failed` и текст ошибки. В тестовом режиме задача
-сразу получает статус `done` и ответ `test-mode: N bytes`.
+В методе 2.1 поле `source` содержит файл WebM в Base64 и не хранится в
+базе. Сервер сразу возвращает созданный Query со статусом `pending`,
+задача выполняется в фоне. Она переводит Query в статус `running` и
+запускает `python -m webm2mp3.cli --bitrate <parameter>` через
+`subprocess`. По завершении Query получает статус `done` или `failed`,
+а в Feedback добавляется запись: путь к MP3 в `response` или текст
+ошибки в `failure`. В тестовом режиме задача сразу завершается со
+статусом `done` и ответом `test-mode: N bytes`.
 
 Отчёт 4.1 — полное внешнее соединение запросов Query, созданных менее
 9 минут назад, с результатами Feedback по `Q.identifier = F.query` и
@@ -164,14 +182,14 @@ uv run webm2mp3-server --username admin --password secret
 
 ```sh
 curl -u admin:secret -X PUT -H "Content-Type: application/json" \
-     -d '{"name": "Иван"}' \
-     http://127.0.0.1:8080/core/api/stable/entity-save/ivan
+     -d '{"ip": "127.0.0.1", "locale": "ru_RU", "platform": "linux"}' \
+     http://127.0.0.1:8080/core/api/stable/entity-save/1
 
 curl -u admin:secret -X PUT -H "Content-Type: application/json" \
-     -d "{\"entity\": \"ivan\", \"tags\": [\"lecture\"], \"source\": \"$(base64 -w0 video.webm)\"}" \
-     http://127.0.0.1:8080/core/api/stable/query-save/q1
+     -d "{\"entity\": 1, \"parameter\": \"128k\", \"tags\": \"lecture\", \"source\": \"$(base64 -w0 video.webm)\"}" \
+     http://127.0.0.1:8080/core/api/stable/query-save/1
 
-curl -u admin:secret http://127.0.0.1:8080/core/api/stable/feedback-show/q1
+curl -u admin:secret http://127.0.0.1:8080/core/api/stable/feedback-show/1
 curl -u admin:secret http://127.0.0.1:8080/core/api/stable/report-show
 ```
 
@@ -182,10 +200,10 @@ from pathlib import Path
 from webm2mp3.client import ApiClient
 
 client = ApiClient("http://127.0.0.1:8080", "admin", "secret")
-client.save_entity("ivan", "Иван")
-client.save_query("q1", "ivan", Path("video.webm").read_bytes(),
-                  description="лекция", tags=["lecture"])
-print(client.show_feedback("q1").payload)
+client.save_entity(1, ip="127.0.0.1", locale="ru_RU", platform="linux")
+client.save_query(1, 1, Path("video.webm").read_bytes(), parameter="128k",
+                  description="лекция", tags="lecture")
+print(client.show_feedback(1).payload)
 print(client.show_report().payload)
 ```
 
@@ -199,10 +217,10 @@ payload)`.
 
 `TinyDBStorage` хранит таблицы Entity, Query и Feedback как таблицы
 TinyDB в одном файле JSON (по умолчанию `data/db.json`). Он реализует
-тот же интерфейс, что и хранилище в памяти: `insert`, `delete`,
-`select`, `update` и `close`. Поэтому прикладная логика и обработчики
+тот же интерфейс, что и хранилище в памяти: `insert`,
+`insert_auto`, `delete`, `select`, `update` и `close`. Поэтому прикладная логика и обработчики
 HTTP API не изменились. Доступ к файлу защищён блокировкой, так как
-фоновые задачи обновляют Feedback из других потоков. Данные
+фоновые задачи обновляют Query и Feedback из других потоков. Данные
 сохраняются между перезапусками сервера.
 
 Хранилище в памяти доступно параметром `--storage memory`.

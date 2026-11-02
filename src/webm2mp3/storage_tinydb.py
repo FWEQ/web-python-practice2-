@@ -9,7 +9,7 @@ from pathlib import Path
 
 from tinydb import Query, TinyDB, where
 
-from webm2mp3.storage import KEYS
+from webm2mp3.storage import KEY
 
 
 class TinyDBStorage:
@@ -21,25 +21,28 @@ class TinyDBStorage:
         self._db = TinyDB(path, encoding="utf-8", ensure_ascii=False)
         self._lock = threading.Lock()
 
-    def _by_key(self, table, key):
-        """Условие поиска записи по значению ключевого поля."""
-        return where(KEYS[table]) == key
-
     def insert(self, table, record):
         """Добавляет запись; возвращает False, если ключ уже занят."""
-        condition = self._by_key(table, record[KEYS[table]])
         with self._lock:
             documents = self._db.table(table)
-            if documents.contains(condition):
+            if documents.contains(where(KEY) == record[KEY]):
                 return False
             documents.insert(record)
             return True
 
+    def insert_auto(self, table, record):
+        """Добавляет запись с идентификатором на 1 больше максимального."""
+        with self._lock:
+            documents = self._db.table(table)
+            keys = (document[KEY] for document in documents.all())
+            row = {KEY: max(keys, default=0) + 1, **record}
+            documents.insert(row)
+            return row
+
     def delete(self, table, key):
         """Удаляет запись по ключу; возвращает True, если она была."""
         with self._lock:
-            removed = self._db.table(table).remove(self._by_key(table, key))
-            return bool(removed)
+            return bool(self._db.table(table).remove(where(KEY) == key))
 
     def select(self, table, filters):
         """Возвращает записи, удовлетворяющие фильтру."""
@@ -53,7 +56,7 @@ class TinyDBStorage:
 
     def update(self, table, key, changes):
         """Изменяет поля записи; возвращает её новую версию или None."""
-        condition = self._by_key(table, key)
+        condition = where(KEY) == key
         with self._lock:
             documents = self._db.table(table)
             if not documents.update(changes, condition):

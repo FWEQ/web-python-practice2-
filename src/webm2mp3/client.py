@@ -13,7 +13,6 @@ from typing import NamedTuple
 
 PREFIX = "/core/api/stable"
 DEFAULT_TIMEOUT = 30
-TAG_SEPARATOR = ","
 
 
 class Response(NamedTuple):
@@ -25,7 +24,12 @@ class Response(NamedTuple):
 
 def quote(value):
     """Экранирует значение для подстановки в путь маршрута."""
-    return urllib.parse.quote(value, safe="")
+    return urllib.parse.quote(str(value), safe="")
+
+
+def without_none(**fields):
+    """Отбрасывает поля со значением None."""
+    return {key: value for key, value in fields.items() if value is not None}
 
 
 class ApiClient:
@@ -64,10 +68,11 @@ class ApiClient:
             with error:
                 return Response(error.code, json.load(error))
 
-    def save_entity(self, identifier, name):
+    def save_entity(self, identifier, ip=None, locale=None, platform=None):
         """1.1. Создаёт запись Entity."""
+        body = without_none(ip=ip, locale=locale, platform=platform)
         route = f"entity-save/{quote(identifier)}"
-        return self.request("PUT", route, body={"name": name})
+        return self.request("PUT", route, body=body)
 
     def delete_entity(self, identifier):
         """1.2. Удаляет запись Entity."""
@@ -75,23 +80,21 @@ class ApiClient:
         return self.request("POST", "entity-delete", body=body)
 
     def show_entity(self, **filters):
-        """1.3. Ищет записи Entity по полям identifier и name."""
+        """1.3. Ищет Entity по полям identifier, ip, locale, platform."""
         return self.request("GET", "entity-show", params=filters)
 
-    def renew_entity(self, identifier, name):
-        """1.4. Изменяет имя записи Entity."""
-        params = {"identifier": identifier, "name": name}
+    def renew_entity(self, identifier, **changes):
+        """1.4. Изменяет поля ip, locale и platform записи Entity."""
+        params = {"identifier": identifier, **changes}
         return self.request("POST", "entity-renew", params=params)
 
-    def save_query(self, identifier, entity, source, description="",
-                   tags=()):
+    def save_query(self, identifier, entity, source, parameter=None,
+                   description=None, tags=None):
         """2.1. Создаёт запрос на извлечение звука из байтов WebM."""
-        body = {
-            "entity": entity,
-            "description": description,
-            "tags": list(tags),
-            "source": base64.b64encode(source).decode("ascii"),
-        }
+        body = without_none(
+            entity=entity, parameter=parameter, description=description,
+            tags=tags, source=base64.b64encode(source).decode("ascii"),
+        )
         route = f"query-save/{quote(identifier)}"
         return self.request("PUT", route, body=body)
 
@@ -101,21 +104,18 @@ class ApiClient:
         return self.request("POST", "query-delete", body=body)
 
     def show_query(self, entity, **filters):
-        """2.3. Ищет запросы Entity по полю identifier и тегу tag."""
+        """2.3. Ищет запросы Entity по полям identifier, status и tag."""
         route = f"query-show/{quote(entity)}"
         return self.request("GET", route, params=filters)
 
     def renew_query(self, identifier, description=None, tags=None):
         """2.4. Изменяет описание и теги запроса Query."""
-        params = {"identifier": identifier}
-        if description is not None:
-            params["description"] = description
-        if tags is not None:
-            params["tags"] = TAG_SEPARATOR.join(tags)
+        params = without_none(identifier=identifier,
+                              description=description, tags=tags)
         return self.request("POST", "query-renew", params=params)
 
     def show_feedback(self, query, **filters):
-        """3.1. Ищет результаты запроса Query по полю status."""
+        """3.1. Ищет результаты запроса Query по полям identifier, status."""
         route = f"feedback-show/{quote(query)}"
         return self.request("GET", route, params=filters)
 

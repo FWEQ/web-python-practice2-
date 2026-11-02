@@ -48,14 +48,16 @@ def test_build_app_uses_credentials(tmp_path):
 
 def test_tinydb_storage_persists(tmp_path):
     """По умолчанию данные сохраняются в файл TinyDB между запусками."""
-    url = "/core/api/stable/entity-save/ivan"
+    url = "/core/api/stable/entity-save/1"
     headers = basic("user", "secret")
     app, runner, storage = build(tmp_path)
-    app.test_client().put(url, json={"name": "Иван"}, headers=headers)
+    saved = app.test_client().put(url, json={"locale": "ru_RU"},
+                                  headers=headers)
     storage.close()
     app, runner, storage = build(tmp_path)
     found = app.test_client().get(
         "/core/api/stable/entity-show", headers=headers
     )
     storage.close()
-    assert found.json["result"] == [{"identifier": "ivan", "name": "Иван"}]
+    assert found.json["result"] == [saved.json["result"]]
+    assert found.json["result"][0]["locale"] == "ru_RU"

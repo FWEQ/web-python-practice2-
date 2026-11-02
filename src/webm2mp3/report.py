@@ -6,9 +6,8 @@
 """
 
 import json
-from datetime import datetime, timedelta
 
-REPORT_WINDOW = timedelta(minutes=9)
+REPORT_WINDOW_SECONDS = 9 * 60
 
 
 def full_outer_join(left, right, left_key, right_key):
@@ -49,11 +48,8 @@ def distinct(rows):
 
 
 def build_report(queries, feedback, now):
-    """Строит отчёт по формуле (11) на момент времени now."""
-    threshold = now - REPORT_WINDOW
-    recent = [
-        query for query in queries
-        if datetime.fromisoformat(query["datetime"]) > threshold
-    ]
+    """Строит отчёт по формуле (11) на момент now (Unix-время)."""
+    threshold = now - REPORT_WINDOW_SECONDS
+    recent = [query for query in queries if query["datetime"] > threshold]
     pairs = full_outer_join(recent, feedback, "identifier", "query")
     return distinct(project(query, item) for query, item in pairs)

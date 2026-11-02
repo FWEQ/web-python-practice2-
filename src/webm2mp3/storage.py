@@ -1,8 +1,8 @@
 """Слой доступа к данным: таблицы Entity, Query и Feedback.
 
-Хранилище предоставляет четыре операции над таблицами: вставку,
-удаление, поиск и изменение. Каждая таблица имеет ключевое поле,
-значения которого уникальны в пределах таблицы.
+Хранилище предоставляет операции над таблицами: вставку (в том числе
+с автоматическим идентификатором), удаление, поиск и изменение.
+Ключевое поле каждой таблицы - целочисленный identifier.
 """
 
 import copy
@@ -11,12 +11,8 @@ import threading
 ENTITY = "entity"
 QUERY = "query"
 FEEDBACK = "feedback"
-
-KEYS = {
-    ENTITY: "identifier",
-    QUERY: "identifier",
-    FEEDBACK: "query",
-}
+TABLES = (ENTITY, QUERY, FEEDBACK)
+KEY = "identifier"
 
 
 def matches(record, filters):
@@ -29,18 +25,25 @@ class MemoryStorage:
 
     def __init__(self):
         """Создаёт пустые таблицы."""
-        self._tables = {table: {} for table in KEYS}
+        self._tables = {table: {} for table in TABLES}
         self._lock = threading.Lock()
 
     def insert(self, table, record):
         """Добавляет запись; возвращает False, если ключ уже занят."""
-        key = record[KEYS[table]]
         with self._lock:
             rows = self._tables[table]
-            if key in rows:
+            if record[KEY] in rows:
                 return False
-            rows[key] = copy.deepcopy(record)
+            rows[record[KEY]] = copy.deepcopy(record)
             return True
+
+    def insert_auto(self, table, record):
+        """Добавляет запись с идентификатором на 1 больше максимального."""
+        with self._lock:
+            rows = self._tables[table]
+            row = {KEY: max(rows, default=0) + 1, **copy.deepcopy(record)}
+            rows[row[KEY]] = row
+            return copy.deepcopy(row)
 
     def delete(self, table, key):
         """Удаляет запись по ключу; возвращает True, если она была."""

@@ -28,60 +28,69 @@ from webm2mp3.client import ApiClient
 from webm2mp3.service import Service
 from webm2mp3.storage import MemoryStorage
 from webm2mp3.storage_tinydb import TinyDBStorage
-from webm2mp3.tasks import STATUS_DONE, TaskRunner, stub_response
+from webm2mp3.tasks import (
+    STATUS_DONE,
+    STATUS_PENDING,
+    TaskRunner,
+    stub_response,
+)
 
 USERNAME = "admin"
 PASSWORD = "пароль"
 HOST = "127.0.0.1"
 POLL_INTERVAL = 0.01
-REPORT_MINUTES = 9
+REPORT_SECONDS = 9 * 60
 START = datetime(2026, 11, 3, tzinfo=timezone.utc)
 
-IDS = st.text(alphabet="abc", min_size=1, max_size=2)
-BAD_IDS = st.sampled_from(["bad!id", "a b", "x" * 65, "точка"])
-NAMES = st.text(alphabet="абвxyz ", min_size=1, max_size=6)
-DESCRIPTIONS = st.text(alphabet="абв de", max_size=6)
-TAG = st.text(alphabet="xyz", min_size=1, max_size=2)
-TAGS = st.lists(TAG, max_size=3)
+IDS = st.integers(min_value=0, max_value=5)
+BAD_IDS = st.sampled_from(["abc", "-1", "1.5", "1" * 19, "один"])
+IPS = st.none() | st.sampled_from(["10.0.0.1", "192.168.1.2"])
+LOCALES = st.none() | st.sampled_from(["ru_RU", "en_US"])
+PLATFORMS = st.none() | st.sampled_from(["linux", "windows"])
+PARAMETERS = st.none() | st.sampled_from(["64k", "128k", "320k"])
+DESCRIPTIONS = st.none() | st.text(alphabet="абв de", max_size=6)
+TAG = st.sampled_from(["x", "y", "z"])
+TAGS = st.none() | st.lists(TAG, max_size=3).map(",".join)
 SOURCES = st.binary(min_size=1, max_size=16)
 STATUSES = st.sampled_from(["pending", "running", "done", "failed"])
-MINUTES = st.integers(min_value=0, max_value=REPORT_MINUTES + 3)
+MINUTES = st.integers(min_value=0, max_value=12)
 
-VALID_QUERY = {"entity": "a", "description": "", "tags": [], "source": "AA=="}
+VALID_QUERY = {"entity": 0, "source": "AA=="}
 INVALID_QUERY_BODIES = [
-    {"description": "", "tags": [], "source": "AA=="},
-    {**VALID_QUERY, "entity": 5},
+    {"source": "AA=="},
+    {**VALID_QUERY, "entity": "0"},
+    {**VALID_QUERY, "entity": True},
+    {**VALID_QUERY, "parameter": "fast"},
+    {**VALID_QUERY, "parameter": 5},
     {**VALID_QUERY, "description": 5},
-    {**VALID_QUERY, "tags": "x"},
-    {**VALID_QUERY, "tags": [5]},
-    {**VALID_QUERY, "tags": [""]},
-    {**VALID_QUERY, "tags": ["a,b"]},
+    {**VALID_QUERY, "tags": ["x"]},
     {**VALID_QUERY, "source": "@@@"},
     {**VALID_QUERY, "source": ""},
-    {"entity": "a"},
+    {"entity": 0},
 ]
+BAD_BODY_IDENTIFIERS = [{}, {"identifier": "1"}, {"identifier": True},
+                        {"identifier": -1}, {"identifier": 1.5}]
 BODY_ENDPOINTS = [
-    ("PUT", "entity-save/a"),
+    ("PUT", "entity-save/1"),
     ("POST", "entity-delete"),
-    ("PUT", "query-save/a"),
+    ("PUT", "query-save/1"),
     ("POST", "query-delete"),
 ]
 MALFORMED_BODIES = [b"", b"{", b"[]", b'"text"']
 INVALID_ENTITY_REQUESTS = st.sampled_from([
-    *[("PUT", "entity-save/a", {"body": body})
-      for body in ({}, {"name": 5}, {"name": ""})],
+    *[("PUT", "entity-save/1", {"body": body})
+      for body in ({"ip": 5}, {"locale": []}, {"platform": 1})],
     *[("POST", "entity-delete", {"body": body})
-      for body in ({}, {"identifier": 5})],
-    *[("POST", "entity-renew", {"params": params})
-      for params in ({}, {"identifier": "a"}, {"name": "x"})],
+      for body in BAD_BODY_IDENTIFIERS],
+    ("POST", "entity-renew", {"params": {"ip": "10.0.0.1"}}),
     *[(method, route, {"data": data})
       for method, route in BODY_ENDPOINTS for data in MALFORMED_BODIES],
 ])
 INVALID_QUERY_REQUESTS = st.sampled_from([
-    *[("PUT", "query-save/a", {"body": body})
+    *[("PUT", "query-save/1", {"body": body})
       for body in INVALID_QUERY_BODIES],
     *[("POST", "query-delete", {"body": body})
-      for body in ({}, {"identifier": 5})],
+      for body in BAD_BODY_IDENTIFIERS],
     *[("POST", "query-renew", {"params": params})
       for params in ({}, {"description": "x"})],
 ])
@@ -110,6 +119,10 @@ class FakeClock:
     def __call__(self):
         """Возвращает текущий момент времени."""
         return self.now
+
+    def timestamp(self):
+        """Текущее Unix-время в целых секундах."""
+        return int(self.now.timestamp())
 
 
 class Dispatcher:
@@ -141,6 +154,15 @@ def canonical(rows):
     )
 
 
+def report_row(query, feedback):
+    """Строка отчёта модели для пары записей (любая может быть None)."""
+    query = query or {}
+    feedback = feedback or {}
+    return {"response": feedback.get("response"),
+            "description": query.get("description"),
+            "tags": query.get("tags")}
+
+
 class ApiMachine(RuleBasedStateMachine):
     """Модель HTTP API: сверяет ответы сервера с ожидаемыми."""
 
@@ -155,7 +177,8 @@ class ApiMachine(RuleBasedStateMachine):
         super().__init__()
         self.clock = FakeClock()
         self.storage = self.storage_factory()
-        runner = TaskRunner(self.storage, "unused", test_mode=True)
+        runner = TaskRunner(self.storage, "unused", self.clock,
+                            test_mode=True)
         service = Service(self.storage, runner, self.clock)
         self.dispatcher.app = create_app(service, USERNAME, PASSWORD)
         self.client = ApiClient(self.base_url, USERNAME, PASSWORD)
@@ -174,38 +197,40 @@ class ApiMachine(RuleBasedStateMachine):
         return response.payload.get("result")
 
     def forget_query(self, identifier):
-        """Удаляет запрос и его результат из модели."""
+        """Удаляет запрос и его результаты из модели."""
         del self.queries[identifier]
-        del self.feedback[identifier]
+        owned = [key for key, item in self.feedback.items()
+                 if item["query"] == identifier]
+        for key in owned:
+            del self.feedback[key]
 
     def expected_report(self):
         """Отчёт по формуле (11), вычисленный по модели."""
-        threshold = self.clock() - timedelta(minutes=REPORT_MINUTES)
-        recent = {
-            key: query for key, query in self.queries.items()
-            if datetime.fromisoformat(query["datetime"]) > threshold
-        }
-        rows = [
-            {"response": self.feedback[key]["response"],
-             "description": query["description"], "tags": query["tags"]}
-            for key, query in recent.items()
-        ]
-        rows += [
-            {"response": item["response"], "description": None,
-             "tags": None}
-            for key, item in self.feedback.items() if key not in recent
-        ]
+        threshold = self.clock.timestamp() - REPORT_SECONDS
+        recent = {key: query for key, query in self.queries.items()
+                  if query["datetime"] > threshold}
+        rows = []
+        for key, query in recent.items():
+            items = [item for item in self.feedback.values()
+                     if item["query"] == key] or [None]
+            rows += [report_row(query, item) for item in items]
+        rows += [report_row(None, item) for item in self.feedback.values()
+                 if item["query"] not in recent]
         return canonical(rows)
 
-    @rule(target=entity_ids, identifier=IDS, name=NAMES)
-    def save_entity(self, identifier, name):
+    @rule(target=entity_ids, identifier=IDS, ip=IPS, locale=LOCALES,
+          platform=PLATFORMS)
+    def save_entity(self, identifier, ip, locale, platform):
         """1.1: создание Entity."""
         success = identifier not in self.entities
-        response = self.client.save_entity(identifier, name)
+        response = self.client.save_entity(identifier, ip, locale, platform)
         result = self.expect(response, success)
         if success:
-            self.entities[identifier] = {"identifier": identifier,
-                                         "name": name}
+            self.entities[identifier] = {
+                "identifier": identifier,
+                "datetime": self.clock.timestamp(),
+                "ip": ip, "locale": locale, "platform": platform,
+            }
             assert result == self.entities[identifier]
         return identifier
 
@@ -221,50 +246,62 @@ class ApiMachine(RuleBasedStateMachine):
             for key in owned:
                 self.forget_query(key)
 
-    @rule(identifier=st.none() | IDS, name=st.none() | NAMES)
-    def show_entity(self, identifier, name):
+    @rule(identifier=st.none() | IDS, ip=IPS, locale=LOCALES,
+          platform=PLATFORMS)
+    def show_entity(self, identifier, ip, locale, platform):
         """1.3: поиск Entity."""
-        filters = without_none(identifier=identifier, name=name)
+        filters = without_none(identifier=identifier, ip=ip, locale=locale,
+                               platform=platform)
         result = self.expect(self.client.show_entity(**filters), True)
         expected = [e for e in self.entities.values() if fits(e, filters)]
         assert canonical(result) == canonical(expected)
 
-    @rule(identifier=entity_ids, name=NAMES)
-    def renew_entity(self, identifier, name):
+    @rule(identifier=entity_ids, ip=IPS, locale=LOCALES, platform=PLATFORMS)
+    def renew_entity(self, identifier, ip, locale, platform):
         """1.4: изменение Entity."""
+        changes = without_none(ip=ip, locale=locale, platform=platform)
         success = identifier in self.entities
-        response = self.client.renew_entity(identifier, name)
+        response = self.client.renew_entity(identifier, **changes)
         result = self.expect(response, success)
         if success:
-            self.entities[identifier]["name"] = name
+            self.entities[identifier].update(changes)
             assert result == self.entities[identifier]
 
     @rule(target=query_ids, identifier=IDS, entity=entity_ids,
-          source=SOURCES,
-          description=DESCRIPTIONS, tags=TAGS)
-    def save_query(self, identifier, entity, source, description, tags):
+          source=SOURCES, parameter=PARAMETERS, description=DESCRIPTIONS,
+          tags=TAGS)
+    def save_query(self, identifier, entity, source, parameter=None,
+                   description=None, tags=None):
         """2.1: создание Query и запуск задачи в тестовом режиме."""
         success = entity in self.entities and identifier not in self.queries
         response = self.client.save_query(identifier, entity, source,
-                                          description, tags)
+                                          parameter, description, tags)
         result = self.expect(response, success)
         if success:
-            self.queries[identifier] = {
+            record = {
                 "identifier": identifier, "entity": entity,
-                "datetime": self.clock().isoformat(),
+                "datetime": self.clock.timestamp(), "parameter": parameter,
                 "description": description, "tags": tags,
+                "status": STATUS_PENDING,
             }
-            self.feedback[identifier] = {
-                "query": identifier, "status": STATUS_DONE,
-                "response": stub_response(source),
-            }
-            assert result == self.queries[identifier]
+            assert result == record
+            self.queries[identifier] = {**record, "status": STATUS_DONE}
+            self.add_feedback(identifier, stub_response(source))
         return identifier
+
+    def add_feedback(self, query, response):
+        """Добавляет в модель результат успешно выполненной задачи."""
+        key = max(self.feedback, default=0) + 1
+        self.feedback[key] = {
+            "identifier": key, "datetime": self.clock.timestamp(),
+            "response": response, "status": STATUS_DONE, "failure": None,
+            "query": query,
+        }
 
     @rule(identifier=query_ids, entity=entity_ids, source=SOURCES)
     def save_duplicate_query(self, identifier, entity, source):
         """2.1: повторное создание Query с занятым идентификатором."""
-        self.save_query(identifier, entity, source, "", [])
+        self.save_query(identifier, entity, source)
 
     @rule(identifier=query_ids)
     def delete_query(self, identifier):
@@ -275,21 +312,21 @@ class ApiMachine(RuleBasedStateMachine):
             self.forget_query(identifier)
 
     @rule(entity=entity_ids, identifier=st.none() | IDS,
-          tag=st.none() | TAG)
-    def show_query(self, entity, identifier, tag):
+          status=st.none() | STATUSES, tag=st.none() | TAG)
+    def show_query(self, entity, identifier, status, tag):
         """2.3: поиск Query по Entity."""
-        filters = without_none(identifier=identifier, tag=tag)
-        result = self.expect(self.client.show_query(entity, **filters), True)
+        filters = without_none(identifier=identifier, status=status)
+        response = self.client.show_query(entity, **filters,
+                                          **without_none(tag=tag))
+        result = self.expect(response, True)
         expected = [
             query for query in self.queries.values()
-            if query["entity"] == entity
-            and identifier in (None, query["identifier"])
-            and (tag is None or tag in query["tags"])
+            if query["entity"] == entity and fits(query, filters)
+            and (tag is None or tag in (query["tags"] or "").split(","))
         ]
         assert canonical(result) == canonical(expected)
 
-    @rule(identifier=query_ids, description=st.none() | DESCRIPTIONS,
-          tags=st.none() | TAGS)
+    @rule(identifier=query_ids, description=DESCRIPTIONS, tags=TAGS)
     def renew_query(self, identifier, description, tags):
         """2.4: изменение Query."""
         success = identifier in self.queries
@@ -300,15 +337,16 @@ class ApiMachine(RuleBasedStateMachine):
             self.queries[identifier].update(changes)
             assert result == self.queries[identifier]
 
-    @rule(query=query_ids, status=st.none() | STATUSES)
-    def show_feedback(self, query, status):
+    @rule(query=query_ids, identifier=st.none() | IDS,
+          status=st.none() | STATUSES)
+    def show_feedback(self, query, identifier, status):
         """3.1: поиск Feedback по Query."""
-        filters = without_none(status=status)
-        result = self.expect(self.client.show_feedback(query, **filters),
-                             True)
+        filters = without_none(identifier=identifier, status=status)
+        response = self.client.show_feedback(query, **filters)
+        result = self.expect(response, True)
         expected = [
-            item for key, item in self.feedback.items()
-            if key == query and fits(item, filters)
+            item for item in self.feedback.values()
+            if item["query"] == query and fits(item, filters)
         ]
         assert canonical(result) == canonical(expected)
 
@@ -341,11 +379,16 @@ class ApiMachine(RuleBasedStateMachine):
         assert response.status == status
         assert response.payload["ok"] is False
 
-    @rule(identifier=BAD_IDS, name=NAMES, source=SOURCES)
-    def bad_identifier(self, identifier, name, source):
-        """Создание записей с недопустимым идентификатором."""
-        self.expect(self.client.save_entity(identifier, name), False)
-        self.expect(self.client.save_query(identifier, "a", source), False)
+    @rule(identifier=BAD_IDS, source=SOURCES)
+    def bad_identifier(self, identifier, source):
+        """Идентификаторы, не являющиеся целыми неотрицательными."""
+        client = self.client
+        self.expect(client.save_entity(identifier), False)
+        self.expect(client.show_entity(identifier=identifier), False)
+        self.expect(client.renew_entity(identifier), False)
+        self.expect(client.save_query(identifier, 0, source), False)
+        self.expect(client.show_query(identifier), False)
+        self.expect(client.show_feedback(identifier), False)
 
     @rule(request=INVALID_ENTITY_REQUESTS | INVALID_QUERY_REQUESTS)
     def invalid_request(self, request):

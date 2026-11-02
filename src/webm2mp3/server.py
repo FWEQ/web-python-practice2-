@@ -64,7 +64,7 @@ def build_storage(args):
 def build_app(args):
     """Собирает приложение Flask; возвращает его, задачи и хранилище."""
     storage = build_storage(args)
-    runner = TaskRunner(storage, args.output_dir, args.test_mode,
+    runner = TaskRunner(storage, args.output_dir, utc_now, args.test_mode,
                         args.workers)
     service = Service(storage, runner, utc_now)
     app = create_app(service, args.username, args.password)

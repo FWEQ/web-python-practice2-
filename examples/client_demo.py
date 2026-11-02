@@ -10,17 +10,16 @@ import time
 from pathlib import Path
 
 from webm2mp3.client import ApiClient
-from webm2mp3.tasks import STATUS_PENDING, STATUS_RUNNING
 
 POLL_SECONDS = 0.5
-ACTIVE = (STATUS_PENDING, STATUS_RUNNING)
+ENTITY_ID = 1
 
 
 def wait_feedback(client, query):
-    """Опрашивает Feedback, пока задача не завершится."""
+    """Опрашивает Feedback, пока задача не запишет результат."""
     while True:
-        feedback = client.show_feedback(query).payload["result"][0]
-        if feedback["status"] not in ACTIVE:
+        feedback = client.show_feedback(query).payload["result"]
+        if feedback:
             return feedback
         time.sleep(POLL_SECONDS)
 
@@ -29,13 +28,14 @@ def main(argv=None):
     """Точка входа демонстрационного клиента."""
     url, username, password, *files = sys.argv[1:] if argv is None else argv
     client = ApiClient(url, username, password)
-    print(client.save_entity("demo", "Демонстрация").payload)
+    print(client.save_entity(ENTITY_ID, "127.0.0.1", "ru_RU",
+                             sys.platform).payload)
     queries = []
-    for number, name in enumerate(files, start=1):
+    for identifier, name in enumerate(files, start=1):
         path = Path(name)
-        identifier = f"q{number}"
-        response = client.save_query(identifier, "demo", path.read_bytes(),
-                                     path.name, ["demo"])
+        response = client.save_query(identifier, ENTITY_ID,
+                                     path.read_bytes(), "128k", path.name,
+                                     "demo")
         print(response.payload)
         queries.append(identifier)
     for identifier in queries:
