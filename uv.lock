@@ -474,12 +474,22 @@ wheels = [
 ]
 
 [[package]]
+name = "tinydb"
+version = "4.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/e9/d30dd8b1b88a75ec3e464eb81feee514ccf97f50bd306d198959e6733210/tinydb-4.9.0.tar.gz", hash = "sha256:6928b1fa785186bda7952a0ba05aaeedc883ede565ca9c7d608de44e5e75de70", size = 31987, upload-time = "2026-08-06T15:03:44.78Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/ef/321cb77b49bc26f36ed1c85d55cd8e80f8f81e5e183b769abf67386c257a/tinydb-4.9.0-py3-none-any.whl", hash = "sha256:111f1f680978a1b7c534d698dd1d76739ff31c74c27fd26a111140b51d8b35d6", size = 25731, upload-time = "2026-08-06T15:03:43.582Z" },
+]
+
+[[package]]
 name = "webm2mp3"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "flask" },
     { name = "imageio-ffmpeg" },
+    { name = "tinydb" },
 ]
 
 [package.dev-dependencies]
@@ -494,6 +504,7 @@ dev = [
 requires-dist = [
     { name = "flask", specifier = ">=3.1.3" },
     { name = "imageio-ffmpeg", specifier = ">=0.8.0" },
+    { name = "tinydb", specifier = ">=4.9.0" },
 ]
 
 [package.metadata.requires-dev]

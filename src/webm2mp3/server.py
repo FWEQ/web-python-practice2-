@@ -10,11 +10,15 @@ from datetime import datetime, timezone
 from webm2mp3.app import create_app
 from webm2mp3.service import Service
 from webm2mp3.storage import MemoryStorage
+from webm2mp3.storage_tinydb import TinyDBStorage
 from webm2mp3.tasks import DEFAULT_WORKERS, TaskRunner
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8080
 DEFAULT_OUTPUT_DIR = "data/output"
+DEFAULT_DATABASE = "data/db.json"
+STORAGE_TINYDB = "tinydb"
+STORAGE_MEMORY = "memory"
 
 
 def utc_now():
@@ -36,6 +40,11 @@ def parse_args(argv):
                         help="адрес сервера (по умолчанию %(default)s)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help="порт сервера (по умолчанию %(default)s)")
+    parser.add_argument("--storage", default=STORAGE_TINYDB,
+                        choices=[STORAGE_TINYDB, STORAGE_MEMORY],
+                        help="слой доступа к данным (%(default)s)")
+    parser.add_argument("--database", default=DEFAULT_DATABASE,
+                        help="файл TinyDB (по умолчанию %(default)s)")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR,
                         help="папка для MP3 (по умолчанию %(default)s)")
     parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
@@ -47,26 +56,30 @@ def parse_args(argv):
 
 def build_storage(args):
     """Создаёт слой доступа к данным по аргументам командной строки."""
-    return MemoryStorage()
+    if args.storage == STORAGE_MEMORY:
+        return MemoryStorage()
+    return TinyDBStorage(args.database)
 
 
 def build_app(args):
-    """Собирает приложение Flask и исполнитель задач."""
+    """Собирает приложение Flask; возвращает его, задачи и хранилище."""
     storage = build_storage(args)
     runner = TaskRunner(storage, args.output_dir, args.test_mode,
                         args.workers)
     service = Service(storage, runner, utc_now)
-    return create_app(service, args.username, args.password), runner
+    app = create_app(service, args.username, args.password)
+    return app, runner, storage
 
 
 def main(argv=None):
     """Точка входа сервера."""
     args = parse_args(argv)
-    app, runner = build_app(args)
+    app, runner, storage = build_app(args)
     try:
         app.run(host=args.host, port=args.port, threaded=True)
     finally:
         runner.shutdown()
+        storage.close()
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@
 с простой моделью таблиц Entity, Query и Feedback в памяти.
 """
 
+import itertools
 import json
 import logging
 import threading
@@ -26,6 +27,7 @@ from webm2mp3.app import create_app
 from webm2mp3.client import ApiClient
 from webm2mp3.service import Service
 from webm2mp3.storage import MemoryStorage
+from webm2mp3.storage_tinydb import TinyDBStorage
 from webm2mp3.tasks import STATUS_DONE, TaskRunner, stub_response
 
 USERNAME = "admin"
@@ -388,3 +390,13 @@ def run_machine(server, storage_factory):
 def test_api_with_memory_storage(server):
     """Модельное тестирование HTTP API с хранилищем в памяти."""
     run_machine(server, MemoryStorage)
+
+
+def test_api_with_tinydb_storage(server, tmp_path):
+    """Модельное тестирование HTTP API со слоем доступа на TinyDB."""
+    files = itertools.count()
+
+    def make_storage():
+        return TinyDBStorage(tmp_path / f"db{next(files)}.json")
+
+    run_machine(server, make_storage)
