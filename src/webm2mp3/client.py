@@ -42,7 +42,7 @@ class ApiClient:
         self.timeout = timeout
         self.headers = {"Accept": "application/json"}
         if username is not None:
-            pair = f"{username}:{password or ''}".encode()
+            pair = "{}:{}".format(username, password or "").encode()
             token = base64.b64encode(pair).decode("ascii")
             self.headers["Authorization"] = f"Basic {token}"
 

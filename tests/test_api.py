@@ -414,7 +414,7 @@ def server():
         daemon=True,
     )
     thread.start()
-    yield dispatcher, f"http://{HOST}:{http.server_port}"
+    yield dispatcher, "http://{}:{}".format(HOST, http.server_port)
     http.shutdown()
     thread.join()
 

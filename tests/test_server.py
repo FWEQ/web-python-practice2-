@@ -12,7 +12,9 @@ CREDENTIALS = ["--username", "user", "--password", "secret"]
 
 def basic(username, password):
     """Заголовок базовой аутентификации."""
-    token = base64.b64encode(f"{username}:{password}".encode()).decode()
+    token = base64.b64encode(
+        "{}:{}".format(username, password).encode()
+    ).decode()
     return {"Authorization": f"Basic {token}"}
 
 
